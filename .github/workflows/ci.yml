@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint bin/acli
+        run: shellcheck bin/acli install.sh
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make acli executable
+        run: chmod +x bin/acli
+
+      - name: acli help
+        run: bin/acli help
+
+      - name: acli version
+        run: bin/acli version
+
+      - name: acli create + list + path + delete
+        run: |
+          export ACLI_BASE="$(mktemp -d)/profiles"
+          bin/acli create test-profile
+          bin/acli list
+          bin/acli path test-profile
+          bin/acli delete test-profile <<< "y"
+
+      - name: acli errors on unknown tool
+        run: |
+          export ACLI_BASE="$(mktemp -d)/profiles"
+          bin/acli unknowntool profile && exit 1 || true
+
+      - name: acli errors on missing profile
+        run: |
+          export ACLI_BASE="$(mktemp -d)/profiles"
+          bin/acli opencode && exit 1 || true

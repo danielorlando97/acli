@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# acli - Multi-profile launcher for Antigravity (CLI & IDE) and OpenCode
+# Manages independent authentication, credentials, and configurations per job/client.
+#
+# GitHub: https://github.com/danielorlando97/acli
+# License: MIT
+
+set -e
+
+ACLI_VERSION="0.1.0"
+ACLI_BASE="${ACLI_BASE:-$HOME/.acli/profiles}"
+
+usage() {
+  cat <<'EOF'
+acli - Multi-profile launcher for AI development tools
+
+Usage:
+  acli <tool> <profile> [arguments...]
+  acli create <profile>
+  acli list
+  acli path <profile>
+  acli delete <profile>
+  acli version
+  acli help
+
+Available tools:
+  agy | cli          Launch Antigravity CLI (agy) under <profile>
+  opencode | oc      Launch OpenCode under <profile>
+  ide | app          Launch Antigravity Desktop IDE under <profile>
+
+Commands:
+  create <profile>   Create/initialize a new profile explicitly
+  list               List all existing profiles and their configured tools
+  path <profile>     Print the directory path for a profile
+  delete <profile>   Remove a profile and its isolated data
+  version            Print the current acli version
+  help               Show this help message
+
+Environment Variables:
+  ACLI_BASE          Override the base directory for profiles (default: ~/.acli/profiles)
+
+Examples:
+  acli create work-empresa1               # Create a new named profile
+  acli agy work-empresa1                  # Open Antigravity CLI as empresa1
+  acli agy work-empresa1 --continue       # Continue the last session
+  acli opencode work-empresa2             # Open OpenCode as empresa2
+  acli opencode work-empresa2 providers auth  # Configure providers for empresa2
+  acli ide work-empresa3 .               # Open Antigravity IDE as empresa3
+  acli list                              # View all profiles and their status
+  acli delete old-profile                # Remove a profile and its data
+
+For more info: https://github.com/danielorlando97/acli
+EOF
+}
+
+init_profile() {
+  local profile="$1"
+  local pdir="$ACLI_BASE/$profile"
+
+  mkdir -p "$pdir/home"
+  mkdir -p "$pdir/opencode/config"
+  mkdir -p "$pdir/opencode/data"
+  mkdir -p "$pdir/opencode/cache"
+  mkdir -p "$pdir/antigravity-ide"
+
+  # Link SSH config to profile home so dev tools work seamlessly
+  if [ ! -e "$pdir/home/.ssh" ] && [ -d "$HOME/.ssh" ]; then
+    ln -s "$HOME/.ssh" "$pdir/home/.ssh" 2>/dev/null || true
+  fi
+  # Copy gitconfig as a base so the user can customize per profile
+  if [ ! -e "$pdir/home/.gitconfig" ] && [ -f "$HOME/.gitconfig" ]; then
+    cp "$HOME/.gitconfig" "$pdir/home/.gitconfig" 2>/dev/null || true
+  fi
+}
+
+list_profiles() {
+  echo "Profiles directory: $ACLI_BASE"
+  if [ ! -d "$ACLI_BASE" ] || [ -z "$(ls -A "$ACLI_BASE" 2>/dev/null)" ]; then
+    echo "No profiles found yet."
+    echo "Create one with: acli create <profile-name>"
+    return 0
+  fi
+
+  printf "\n%-20s %-15s %-15s %-15s\n" "PROFILE" "AGY (CLI)" "OPENCODE" "IDE"
+  printf "%-20s %-15s %-15s %-15s\n" "-------" "---------" "--------" "---"
+
+  for d in "$ACLI_BASE"/*; do
+    [ -d "$d" ] || continue
+    local name
+    name=$(basename "$d")
+
+    local agy_status="not configured"
+    local oc_status="not configured"
+    local ide_status="not configured"
+
+    if [ -d "$d/home/.gemini/antigravity-cli" ]; then
+      agy_status="configured ✓"
+    fi
+    if [ -f "$d/opencode/data/opencode/auth.json" ] || [ -f "$d/opencode/config/opencode/opencode.json" ]; then
+      oc_status="configured ✓"
+    fi
+    if [ -d "$d/antigravity-ide" ] && [ -n "$(ls -A "$d/antigravity-ide" 2>/dev/null)" ]; then
+      ide_status="configured ✓"
+    fi
+
+    printf "%-20s %-15s %-15s %-15s\n" "$name" "$agy_status" "$oc_status" "$ide_status"
+  done
+  echo ""
+}
+
+TOOL="${1:-help}"
+shift 2>/dev/null || true
+
+case "$TOOL" in
+  help | -h | --help)
+    usage
+    exit 0
+    ;;
+  version | -v | --version)
+    echo "acli v$ACLI_VERSION"
+    exit 0
+    ;;
+  list | profiles | ls)
+    list_profiles
+    exit 0
+    ;;
+  create | new | init)
+    PROFILE="$1"
+    if [ -z "$PROFILE" ]; then
+      echo "Error: Missing profile name."
+      echo "Usage: acli create <profile>"
+      exit 1
+    fi
+    if [[ "$PROFILE" =~ ^- ]]; then
+      echo "Error: Profile name cannot start with '-'."
+      exit 1
+    fi
+    if [ -d "$ACLI_BASE/$PROFILE" ]; then
+      echo "Profile '$PROFILE' already exists at $ACLI_BASE/$PROFILE"
+      exit 0
+    fi
+    init_profile "$PROFILE"
+    echo "✓ Profile '$PROFILE' created at $ACLI_BASE/$PROFILE"
+    echo ""
+    echo "Next steps:"
+    echo "  acli agy $PROFILE                   # Login to Antigravity CLI"
+    echo "  acli opencode $PROFILE providers auth  # Login to OpenCode"
+    echo "  acli ide $PROFILE .                 # Open Antigravity IDE"
+    exit 0
+    ;;
+  delete | rm | remove)
+    PROFILE="$1"
+    if [ -z "$PROFILE" ]; then
+      echo "Error: Missing profile name to delete."
+      echo "Usage: acli delete <profile>"
+      exit 1
+    fi
+    PDIR="$ACLI_BASE/$PROFILE"
+    if [ ! -d "$PDIR" ]; then
+      echo "Error: Profile '$PROFILE' does not exist."
+      exit 1
+    fi
+    printf "Are you sure you want to delete profile '%s' and all its data? [y/N] " "$PROFILE"
+    read -r CONFIRM
+    if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+      rm -rf "$PDIR"
+      echo "✓ Profile '$PROFILE' has been deleted."
+    else
+      echo "Cancelled."
+    fi
+    exit 0
+    ;;
+  path)
+    PROFILE="$1"
+    if [ -z "$PROFILE" ]; then
+      echo "Error: Missing profile name."
+      echo "Usage: acli path <profile>"
+      exit 1
+    fi
+    echo "$ACLI_BASE/$PROFILE"
+    exit 0
+    ;;
+esac
+
+# --- Tool launcher ---
+
+PROFILE="$1"
+shift 2>/dev/null || true
+
+if [ -z "$PROFILE" ]; then
+  echo "Error: Missing profile name for tool '$TOOL'."
+  echo ""
+  usage
+  exit 1
+fi
+
+if [[ "$PROFILE" =~ ^- ]]; then
+  echo "Error: Expected profile name, got option '$PROFILE'."
+  echo "Syntax: acli $TOOL <profile> [args...]"
+  exit 1
+fi
+
+init_profile "$PROFILE"
+PDIR="$ACLI_BASE/$PROFILE"
+
+case "$TOOL" in
+  agy | cli)
+    # Isolate HOME so ~/.gemini/antigravity-cli is scoped to this profile
+    if ! command -v agy &>/dev/null; then
+      echo "Error: 'agy' is not installed or not in PATH."
+      echo "Install it from: https://antigravity.google"
+      exit 1
+    fi
+    export HOME="$PDIR/home"
+    exec agy "$@"
+    ;;
+
+  opencode | oc)
+    # OpenCode uses XDG base directories for config, data, and cache
+    if ! command -v opencode &>/dev/null; then
+      echo "Error: 'opencode' is not installed or not in PATH."
+      echo "Install it from: https://opencode.ai"
+      exit 1
+    fi
+    export XDG_CONFIG_HOME="$PDIR/opencode/config"
+    export XDG_DATA_HOME="$PDIR/opencode/data"
+    export XDG_CACHE_HOME="$PDIR/opencode/cache"
+    exec opencode "$@"
+    ;;
+
+  ide | app | antigravity)
+    # Antigravity IDE (desktop app based on VS Code)
+    if [ ! -d "/Applications/Antigravity.app" ]; then
+      echo "Error: Antigravity IDE not found at /Applications/Antigravity.app"
+      echo "Download it from: https://antigravity.google"
+      exit 1
+    fi
+    IDE_DATA="$PDIR/antigravity-ide"
+    TARGET="${1:-.}"
+    if [ -n "$1" ]; then shift; fi
+    open -n -a "/Applications/Antigravity.app" --args \
+      --user-data-dir "$IDE_DATA" \
+      "$TARGET" "$@"
+    ;;
+
+  *)
+    echo "Error: Unknown tool '$TOOL'."
+    echo ""
+    usage
+    exit 1
+    ;;
+esac
