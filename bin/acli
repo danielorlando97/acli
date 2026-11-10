@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# acli - Multi-profile launcher for Antigravity (CLI & IDE) and OpenCode
-# Manages independent authentication, credentials, and configurations per job/client.
+# acli - Multi-profile launcher for AI development tools
+# Supports: Antigravity CLI (agy), OpenCode, Antigravity IDE, Claude Code, Codex CLI
 #
 # GitHub: https://github.com/danielorlando97/acli
 # License: MIT
 
 set -e
 
-ACLI_VERSION="0.1.0"
+ACLI_VERSION="0.2.0"
 ACLI_BASE="${ACLI_BASE:-$HOME/.acli/profiles}"
 
 usage() {
@@ -24,15 +24,17 @@ Usage:
   acli help
 
 Available tools:
-  agy | cli          Launch Antigravity CLI (agy) under <profile>
-  opencode | oc      Launch OpenCode under <profile>
-  ide | app          Launch Antigravity Desktop IDE under <profile>
+  agy | cli          Antigravity CLI (agy)       → isolates ~/.gemini/antigravity-cli
+  opencode | oc      OpenCode                    → isolates XDG_CONFIG/DATA/CACHE dirs
+  ide | app          Antigravity Desktop IDE      → isolates --user-data-dir
+  claude | cc        Claude Code (claude)         → isolates CLAUDE_CONFIG_DIR
+  codex              Codex CLI (codex)            → isolates CODEX_HOME
 
 Commands:
   create <profile>   Create/initialize a new profile explicitly
-  list               List all existing profiles and their configured tools
+  list               List all existing profiles and their status
   path <profile>     Print the directory path for a profile
-  delete <profile>   Remove a profile and its isolated data
+  delete <profile>   Remove a profile and all its isolated data
   version            Print the current acli version
   help               Show this help message
 
@@ -40,14 +42,16 @@ Environment Variables:
   ACLI_BASE          Override the base directory for profiles (default: ~/.acli/profiles)
 
 Examples:
-  acli create work-empresa1               # Create a new named profile
-  acli agy work-empresa1                  # Open Antigravity CLI as empresa1
-  acli agy work-empresa1 --continue       # Continue the last session
-  acli opencode work-empresa2             # Open OpenCode as empresa2
-  acli opencode work-empresa2 providers auth  # Configure providers for empresa2
-  acli ide work-empresa3 .               # Open Antigravity IDE as empresa3
-  acli list                              # View all profiles and their status
-  acli delete old-profile                # Remove a profile and its data
+  acli create work-empresa1
+  acli agy work-empresa1
+  acli agy work-empresa1 --continue
+  acli opencode work-empresa2 providers auth
+  acli opencode work-empresa2
+  acli ide work-empresa3 .
+  acli claude work-empresa4
+  acli codex work-empresa5
+  acli list
+  acli delete old-client
 
 For more info: https://github.com/danielorlando97/acli
 EOF
@@ -62,12 +66,14 @@ init_profile() {
   mkdir -p "$pdir/opencode/data"
   mkdir -p "$pdir/opencode/cache"
   mkdir -p "$pdir/antigravity-ide"
+  mkdir -p "$pdir/claude"
+  mkdir -p "$pdir/codex"
 
-  # Link SSH config to profile home so dev tools work seamlessly
+  # Symlink SSH so git/ssh tools work normally inside isolated HOME
   if [ ! -e "$pdir/home/.ssh" ] && [ -d "$HOME/.ssh" ]; then
     ln -s "$HOME/.ssh" "$pdir/home/.ssh" 2>/dev/null || true
   fi
-  # Copy gitconfig as a base so the user can customize per profile
+  # Copy gitconfig as a base so the user can customize per-profile
   if [ ! -e "$pdir/home/.gitconfig" ] && [ -f "$HOME/.gitconfig" ]; then
     cp "$HOME/.gitconfig" "$pdir/home/.gitconfig" 2>/dev/null || true
   fi
@@ -81,29 +87,27 @@ list_profiles() {
     return 0
   fi
 
-  printf "\n%-20s %-15s %-15s %-15s\n" "PROFILE" "AGY (CLI)" "OPENCODE" "IDE"
-  printf "%-20s %-15s %-15s %-15s\n" "-------" "---------" "--------" "---"
+  printf "\n%-20s %-12s %-12s %-12s %-12s %-12s\n" "PROFILE" "AGY" "OPENCODE" "IDE" "CLAUDE" "CODEX"
+  printf "%-20s %-12s %-12s %-12s %-12s %-12s\n" "-------" "---" "--------" "---" "------" "-----"
 
   for d in "$ACLI_BASE"/*; do
     [ -d "$d" ] || continue
     local name
     name=$(basename "$d")
 
-    local agy_status="not configured"
-    local oc_status="not configured"
-    local ide_status="not configured"
+    local agy_s="-" oc_s="-" ide_s="-" claude_s="-" codex_s="-"
 
-    if [ -d "$d/home/.gemini/antigravity-cli" ]; then
-      agy_status="configured ✓"
-    fi
-    if [ -f "$d/opencode/data/opencode/auth.json" ] || [ -f "$d/opencode/config/opencode/opencode.json" ]; then
-      oc_status="configured ✓"
-    fi
-    if [ -d "$d/antigravity-ide" ] && [ -n "$(ls -A "$d/antigravity-ide" 2>/dev/null)" ]; then
-      ide_status="configured ✓"
-    fi
+    [ -d "$d/home/.gemini/antigravity-cli" ]                     && agy_s="✓"
+    { [ -f "$d/opencode/data/opencode/auth.json" ] ||
+      [ -f "$d/opencode/config/opencode/opencode.json" ]; }       && oc_s="✓"
+    [ -n "$(ls -A "$d/antigravity-ide" 2>/dev/null)" ]           && ide_s="✓"
+    { [ -f "$d/claude/.claude.json" ] ||
+      [ -f "$d/claude/settings.json" ]; }                         && claude_s="✓"
+    { [ -f "$d/codex/auth.json" ] ||
+      [ -f "$d/codex/config.toml" ]; }                            && codex_s="✓"
 
-    printf "%-20s %-15s %-15s %-15s\n" "$name" "$agy_status" "$oc_status" "$ide_status"
+    printf "%-20s %-12s %-12s %-12s %-12s %-12s\n" \
+      "$name" "$agy_s" "$oc_s" "$ide_s" "$claude_s" "$codex_s"
   done
   echo ""
 }
@@ -142,10 +146,12 @@ case "$TOOL" in
     init_profile "$PROFILE"
     echo "✓ Profile '$PROFILE' created at $ACLI_BASE/$PROFILE"
     echo ""
-    echo "Next steps:"
-    echo "  acli agy $PROFILE                   # Login to Antigravity CLI"
-    echo "  acli opencode $PROFILE providers auth  # Login to OpenCode"
-    echo "  acli ide $PROFILE .                 # Open Antigravity IDE"
+    echo "Next steps (login per tool):"
+    echo "  acli agy     $PROFILE                    # Antigravity CLI"
+    echo "  acli opencode $PROFILE providers auth     # OpenCode"
+    echo "  acli ide     $PROFILE .                  # Antigravity IDE"
+    echo "  acli claude  $PROFILE                    # Claude Code"
+    echo "  acli codex   $PROFILE login               # Codex CLI"
     exit 0
     ;;
   delete | rm | remove)
@@ -195,7 +201,7 @@ if [ -z "$PROFILE" ]; then
 fi
 
 if [[ "$PROFILE" =~ ^- ]]; then
-  echo "Error: Expected profile name, got option '$PROFILE'."
+  echo "Error: Expected a profile name but got option '$PROFILE'."
   echo "Syntax: acli $TOOL <profile> [args...]"
   exit 1
 fi
@@ -205,23 +211,23 @@ PDIR="$ACLI_BASE/$PROFILE"
 
 case "$TOOL" in
   agy | cli)
-    # Isolate HOME so ~/.gemini/antigravity-cli is scoped to this profile
     if ! command -v agy &>/dev/null; then
       echo "Error: 'agy' is not installed or not in PATH."
       echo "Install it from: https://antigravity.google"
       exit 1
     fi
+    # Isolate HOME → owns ~/.gemini/antigravity-cli
     export HOME="$PDIR/home"
     exec agy "$@"
     ;;
 
   opencode | oc)
-    # OpenCode uses XDG base directories for config, data, and cache
     if ! command -v opencode &>/dev/null; then
       echo "Error: 'opencode' is not installed or not in PATH."
       echo "Install it from: https://opencode.ai"
       exit 1
     fi
+    # OpenCode respects XDG base dirs
     export XDG_CONFIG_HOME="$PDIR/opencode/config"
     export XDG_DATA_HOME="$PDIR/opencode/data"
     export XDG_CACHE_HOME="$PDIR/opencode/cache"
@@ -229,7 +235,6 @@ case "$TOOL" in
     ;;
 
   ide | app | antigravity)
-    # Antigravity IDE (desktop app based on VS Code)
     if [ ! -d "/Applications/Antigravity.app" ]; then
       echo "Error: Antigravity IDE not found at /Applications/Antigravity.app"
       echo "Download it from: https://antigravity.google"
@@ -237,10 +242,32 @@ case "$TOOL" in
     fi
     IDE_DATA="$PDIR/antigravity-ide"
     TARGET="${1:-.}"
-    if [ -n "$1" ]; then shift; fi
+    [ -n "$1" ] && shift
     open -n -a "/Applications/Antigravity.app" --args \
       --user-data-dir "$IDE_DATA" \
       "$TARGET" "$@"
+    ;;
+
+  claude | cc | claude-code)
+    if ! command -v claude &>/dev/null; then
+      echo "Error: 'claude' is not installed or not in PATH."
+      echo "Install it from: https://claude.ai/download"
+      exit 1
+    fi
+    # Claude Code uses CLAUDE_CONFIG_DIR for all credentials and settings
+    export CLAUDE_CONFIG_DIR="$PDIR/claude"
+    exec claude "$@"
+    ;;
+
+  codex)
+    if ! command -v codex &>/dev/null; then
+      echo "Error: 'codex' is not installed or not in PATH."
+      echo "Install it from: https://github.com/openai/codex"
+      exit 1
+    fi
+    # Codex uses CODEX_HOME for auth, config and sessions
+    export CODEX_HOME="$PDIR/codex"
+    exec codex "$@"
     ;;
 
   *)

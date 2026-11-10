@@ -42,6 +42,16 @@ jobs:
           bin/acli path test-profile
           bin/acli delete test-profile <<< "y"
 
+      - name: acli creates subdirs for all 5 tools
+        run: |
+          export ACLI_BASE="$(mktemp -d)/profiles"
+          bin/acli create alltools
+          test -d "$ACLI_BASE/alltools/home"
+          test -d "$ACLI_BASE/alltools/opencode"
+          test -d "$ACLI_BASE/alltools/antigravity-ide"
+          test -d "$ACLI_BASE/alltools/claude"
+          test -d "$ACLI_BASE/alltools/codex"
+
       - name: acli errors on unknown tool
         run: |
           export ACLI_BASE="$(mktemp -d)/profiles"

@@ -1,6 +1,6 @@
 # acli
 
-> Multi-profile launcher for **Antigravity CLI**, **OpenCode**, and **Antigravity IDE** — manage independent accounts, credentials, and sessions for every job or client on the same machine.
+> Multi-profile launcher for **Antigravity CLI**, **OpenCode**, **Antigravity IDE**, **Claude Code** and **Codex CLI** — manage independent accounts, credentials, and sessions for every job or client on the same machine.
 
 ---
 
@@ -56,6 +56,8 @@ acli help
 | `agy`, `cli` | Antigravity CLI (`agy`) |
 | `opencode`, `oc` | OpenCode |
 | `ide`, `app` | Antigravity Desktop IDE |
+| `claude`, `cc` | Claude Code (`claude`) |
+| `codex` | Codex CLI (`codex`) |
 
 ---
 
@@ -106,6 +108,32 @@ acli ide work-empresa1 ~/src/empresa1
 acli ide work-empresa2 ~/src/empresa2
 ```
 
+### Claude Code
+
+```bash
+# Start Claude Code — first run will prompt you to log in
+acli claude work-empresa4
+
+# Continue the last session
+acli claude work-empresa4 --continue
+
+# Use claude with a specific tool config
+acli claude work-empresa4 --allowedTools Bash Edit
+```
+
+### Codex CLI
+
+```bash
+# Log in to OpenAI for this profile
+acli codex work-empresa5 login
+
+# Start a new session
+acli codex work-empresa5
+
+# Run non-interactively
+acli codex work-empresa5 exec "refactor this file"
+```
+
 ### Profile Management
 
 ```bash
@@ -134,7 +162,9 @@ Each profile creates an isolated directory under `~/.acli/profiles/<profile>/`:
 │   ├── config/              # XDG_CONFIG_HOME for OpenCode
 │   ├── data/                # XDG_DATA_HOME (auth tokens, DB)
 │   └── cache/               # XDG_CACHE_HOME
-└── antigravity-ide/         # --user-data-dir for the desktop IDE
+├── antigravity-ide/         # --user-data-dir for the desktop IDE
+├── claude/                  # CLAUDE_CONFIG_DIR for Claude Code
+└── codex/                   # CODEX_HOME for Codex CLI
 ```
 
 ### Isolation strategy per tool
@@ -144,6 +174,8 @@ Each profile creates an isolated directory under `~/.acli/profiles/<profile>/`:
 | `agy` | `HOME` override → each profile owns its `~/.gemini/antigravity-cli` |
 | `opencode` | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` overrides |
 | Antigravity IDE | `--user-data-dir` flag + `open -n` (macOS new instance) |
+| `claude` | `CLAUDE_CONFIG_DIR` override |
+| `codex` | `CODEX_HOME` override |
 
 ---
 
@@ -187,6 +219,8 @@ compdef _acli acli
   - [`agy`](https://antigravity.google) — Antigravity CLI
   - [`opencode`](https://opencode.ai) — OpenCode CLI
   - Antigravity IDE (`/Applications/Antigravity.app`)
+  - [`claude`](https://claude.ai/download) — Claude Code CLI
+  - [`codex`](https://github.com/openai/codex) — Codex CLI
 
 ---
 
